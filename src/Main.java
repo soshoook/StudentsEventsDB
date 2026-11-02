@@ -13,9 +13,9 @@ public class Main extends JFrame {
     private static final String DB_PATH = "events.db";
     private static final String BACKUP_DIR = "events_backup";
 
-    private FileStorage storage;
-    private final JTable table;
-    private final DefaultTableModel model;
+    private FileStorage storage; //текущая открытая бд
+    private final JTable table; //таблица в окне
+    private final DefaultTableModel model; //её модель данных
 
     public Main() {
         setTitle("База данных мероприятий");
@@ -55,17 +55,20 @@ public class Main extends JFrame {
         openDatabase();
     }
 
+    //создание кнопки
     private void addButton(JPanel panel, String title, Runnable action) {
         JButton button = new JButton(title);
         button.addActionListener(e -> action.run());
         panel.add(button);
     }
 
+    //диалоговое окно с ошибкой
     private void showError(Exception e) {
         JOptionPane.showMessageDialog(this, e.getMessage(),
                 "Ошибка", JOptionPane.ERROR_MESSAGE);
     }
 
+    //закрывает базу если открыта
     private void closeStorage() throws IOException {
         if (storage != null) {
             storage.close();
@@ -73,6 +76,7 @@ public class Main extends JFrame {
         }
     }
 
+    //закрывает старую базу и открывает уже готовую (либо сам создает новую)
     private void openDatabase() {
         try {
             closeStorage();
@@ -89,6 +93,7 @@ public class Main extends JFrame {
         }
     }
 
+    //создает новую пустую базу
     private void createDatabase() {
         int answer = JOptionPane.showConfirmDialog(this,
                 "Создать пустую базу? Текущие записи будут удалены.",
@@ -106,7 +111,9 @@ public class Main extends JFrame {
         }
     }
 
+    //диалоговое окно для создание ивента
     private Event eventFromDialog(Event old) {
+        //текстовые поля
         JTextField name = new JTextField(old == null ? "" : old.name);
         JTextField description = new JTextField(old == null ? "" : old.description);
         JTextField date = new JTextField(old == null ? "2026-11-05" : old.date.toString());
@@ -115,6 +122,7 @@ public class Main extends JFrame {
         JTextField type = new JTextField(old == null ? "" : old.type);
         JTextField status = new JTextField(old == null ? "0" : Byte.toString(old.status));
 
+        //раскладываем данные по колонкам
         JPanel panel = new JPanel(new GridLayout(0, 2, 6, 6));
         panel.add(new JLabel("Название:")); panel.add(name);
         panel.add(new JLabel("Описание:")); panel.add(description);
@@ -122,7 +130,7 @@ public class Main extends JFrame {
         panel.add(new JLabel("Время начала:")); panel.add(start);
         panel.add(new JLabel("Время окончания:")); panel.add(end);
         panel.add(new JLabel("Тип:")); panel.add(type);
-        panel.add(new JLabel("Статус (число):")); panel.add(status);
+        panel.add(new JLabel("Статус (0 - активно, 1 - завершено):")); panel.add(status);
 
         int result = JOptionPane.showConfirmDialog(this, panel,
                 old == null ? "Новое мероприятие" : "Изменение мероприятия",
@@ -130,6 +138,7 @@ public class Main extends JFrame {
 
         if (result != JOptionPane.OK_OPTION) return null;
 
+        //парсит дату, чтобы был верный формат
         LocalDate parsedDate = LocalDate.parse(date.getText().trim());
         byte parsedStatus = Byte.parseByte(status.getText().trim());
         int id = old == null ? 0 : old.id;
@@ -139,6 +148,7 @@ public class Main extends JFrame {
                 type.getText(), parsedStatus);
     }
 
+    //создание ивента
     private void addEvent() {
         if (storage == null) {
             showError(new IOException("Сначала откройте базу данных"));
@@ -157,6 +167,7 @@ public class Main extends JFrame {
         }
     }
 
+    //какое мероприятие выделено в таблице (для изм и удаления)
     private Event selectedEvent() {
         int row = table.getSelectedRow();
         if (row == -1) {
@@ -174,6 +185,7 @@ public class Main extends JFrame {
         }
     }
 
+    //изменение данных меро
     private void editEvent() {
         Event old = selectedEvent();
         if (old == null) return;
@@ -191,6 +203,7 @@ public class Main extends JFrame {
         }
     }
 
+    //получает выбранный ивент, подтверждает удаление
     private void deleteEvent() {
         Event event = selectedEvent();
         if (event == null) return;
@@ -209,6 +222,7 @@ public class Main extends JFrame {
         }
     }
 
+    //ищем мероприятия по ключам
     private void searchEvents() {
         if (storage == null) return;
 
@@ -239,6 +253,7 @@ public class Main extends JFrame {
         }
     }
 
+    //показывает меро в таблице
     private void showEvents(List<Event> events) {
         model.setRowCount(0);
 
@@ -249,12 +264,13 @@ public class Main extends JFrame {
         }
     }
 
+    //бэкап
     private void backupDatabase() {
         if (storage == null) return;
 
         try {
-            closeStorage();
-
+            closeStorage();//закрываем бд, чтобы все данные точно были на диске
+            //создает копию бд в отдельную папку вместе с индексами
             Path backup = Path.of(BACKUP_DIR);
             Files.createDirectories(backup);
 

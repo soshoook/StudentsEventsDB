@@ -18,11 +18,12 @@ public class FileStorage implements AutoCloseable {
             4 + NAME_SIZE + DESCRIPTION_SIZE + DATE_SIZE
                     + TIME_SIZE * 2 + TYPE_SIZE + 1 + 1;
 
-    private final RandomAccessFile file;
+    private final RandomAccessFile file; //файл бд
     private final HashIndex[] indexes = new HashIndex[Field.values().length];
-    private int slotCount;
-    private int nextId;
+    private int slotCount; //сколько слотов занята
+    private int nextId; //какой ид выдавать след записи
 
+    //формирует путь для каждого индекса
     private static String indexPath(String path, Field field) {
         return path + "." + field.name().toLowerCase() + ".idx";
     }
@@ -43,7 +44,7 @@ public class FileStorage implements AutoCloseable {
     //открывает базу
     public FileStorage(String path) throws IOException {
         file = new RandomAccessFile(path, "rw");
-
+        //проверка чтобы значения существовали или были адекватными
         if (file.length() < HEADER_SIZE) {
             file.close();
             throw new IOException("Некорректный файл базы данных");
@@ -59,7 +60,7 @@ public class FileStorage implements AutoCloseable {
         }
 
         boolean rebuild = false;
-        try {
+        try { //проверяем файл индекса (если его нет/короче - rebuild и создание пустого)
             for (Field field : Field.values()) {
                 String p = indexPath(path, field);
                 File idx = new File(p);
@@ -70,13 +71,14 @@ public class FileStorage implements AutoCloseable {
                 indexes[field.ordinal()] = new HashIndex(p);
             }
             if (rebuild) rebuildIndexes();
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException e) { //если что-то упало то все закрывае и выдаем ошибку
             closeIndexes();
             file.close();
             throw e;
         }
     }
 
+    //закрывает осн файл и все индексы
     @Override
     public void close() throws IOException {
         IOException error = null;
@@ -98,6 +100,7 @@ public class FileStorage implements AutoCloseable {
         if (error != null) throw error;
     }
 
+    //закрывает индексы, игнорит ошибки (аварийная очистка конструктора)
     private void closeIndexes() {
         for (HashIndex index : indexes) {
             if (index != null) {
@@ -108,17 +111,18 @@ public class FileStorage implements AutoCloseable {
         }
     }
 
+    //позиция в байтах
     private long position(int slot) {
         return HEADER_SIZE + (long) slot * RECORD_SIZE;
     }
-
+    //slotCount и nextId в начале
     private void writeHeader() throws IOException {
         file.seek(0);
         file.writeInt(slotCount);
         file.writeInt(nextId);
     }
 
-    // Строки записываются в поля фиксированной длины.
+    //строки записываются в поля фикс длины
     private byte[] stringBytes(String value, int size) throws IOException {
         if (value == null) value = "";
         byte[] source = value.getBytes(StandardCharsets.UTF_8);
@@ -130,6 +134,7 @@ public class FileStorage implements AutoCloseable {
         return result;
     }
 
+    //из строк в байты
     private String readString(ByteBuffer buffer, int size) {
         byte[] bytes = new byte[size];
         buffer.get(bytes);
@@ -138,6 +143,7 @@ public class FileStorage implements AutoCloseable {
         return new String(bytes, 0, length, StandardCharsets.UTF_8);
     }
 
+    //превращаем Event в массив 274 байт
     private byte[] encode(Event e, int id) throws IOException {
         if (e.date == null) throw new IOException("Не задана дата");
 
@@ -154,7 +160,7 @@ public class FileStorage implements AutoCloseable {
         return b.array();
     }
 
-    // Получает значение поля из объекта Event.
+    //получение зн поля из Event
     private static Object key(Field field, Event e) {
         switch (field) {
             case ID: return e.id;
@@ -169,7 +175,7 @@ public class FileStorage implements AutoCloseable {
         }
     }
 
-    // Преобразует текст поиска в тип, который хранится в поле.
+    //преобразование теста поиска в тип поля
     private static Object parse(Field field, String value) {
         try {
             switch (field) {
@@ -183,7 +189,7 @@ public class FileStorage implements AutoCloseable {
         }
     }
 
-    // Читает запись по номеру слота. Для удалённой записи возвращает null.
+    //чтение записи по номеру слота
     public Event read(int slot) throws IOException {
         if (slot < 0 || slot >= slotCount) return null;
 
@@ -207,6 +213,7 @@ public class FileStorage implements AutoCloseable {
                 startTime, endTime, type, status);
     }
 
+    //собирает все не удаленные записи
     public List<Event> listAll() throws IOException {
         List<Event> result = new ArrayList<>();
         for (int i = 0; i < slotCount; i++) {
@@ -216,7 +223,7 @@ public class FileStorage implements AutoCloseable {
         return result;
     }
 
-    // Ищет слоты в цепочке хеш-индекса и проверяет точное значение.
+    //поиск слотов в цепи хэш-индекса
     private void collect(Field field, Object value,
                          List<Integer> slots, List<Event> events) throws IOException {
         HashIndex index = indexes[field.ordinal()];
@@ -229,6 +236,7 @@ public class FileStorage implements AutoCloseable {
         }
     }
 
+    //ищем ивент по какому то параметру
     public List<Event> search(Field field, String value) throws IOException {
         List<Event> result = new ArrayList<>();
         collect(field, parse(field, value), null, result);
@@ -236,7 +244,7 @@ public class FileStorage implements AutoCloseable {
         return result;
     }
 
-    // Добавляет запись в конец файла. Удалённые слоты не переиспользуются.
+    //добавление записи в конец файла
     public int add(Event e) throws IOException {
         int id = e.id > 0 ? e.id : nextId;
 
@@ -260,6 +268,8 @@ public class FileStorage implements AutoCloseable {
         return id;
     }
 
+    //мягкое удаление (запись остается в файле, но пользователь не видит её)
+    //удаление одной записи
     private void removeSlot(int slot, Event e) throws IOException {
         for (Field field : Field.values()) {
             indexes[field.ordinal()].unlink(slot, key(field, e));
@@ -268,6 +278,7 @@ public class FileStorage implements AutoCloseable {
         file.writeByte(1);
     }
 
+    //удаление записей по определенному признаку (в визуале не реализовано)
     public int deleteBy(Field field, String value) throws IOException {
         List<Integer> slots = new ArrayList<>();
         List<Event> events = new ArrayList<>();
@@ -279,7 +290,7 @@ public class FileStorage implements AutoCloseable {
         return slots.size();
     }
 
-    // Обновляет запись по ID и меняет индексы изменённых полей.
+    //обновление записи и ид
     public boolean update(Event e) throws IOException {
         List<Integer> slots = new ArrayList<>();
         List<Event> oldEvents = new ArrayList<>();
@@ -304,6 +315,7 @@ public class FileStorage implements AutoCloseable {
         return true;
     }
 
+    //ресетает индексы в случае потере данных
     public void rebuildIndexes() throws IOException {
         for (HashIndex index : indexes) index.reset();
 
@@ -317,6 +329,7 @@ public class FileStorage implements AutoCloseable {
         }
     }
 
+    //считает живые записи
     public int getCount() throws IOException {
         int count = 0;
         for (int i = 0; i < slotCount; i++) {
@@ -325,6 +338,7 @@ public class FileStorage implements AutoCloseable {
         return count;
     }
 
+    //все слоты включая удаленные
     public int getSlotCount() {
         return slotCount;
     }

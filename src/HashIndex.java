@@ -3,24 +3,8 @@ import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
-/*
- * Служебный файл: хеш-таблица на диске для ОДНОГО поля.
- *
- * Формат файла:
- *   [BUCKETS корзин по 4 байта: head] [узел слота 0: prev(4) next(4)] [узел слота 1] ...
- *
- *   head[b]  - номер слота, с которого начинается цепочка корзины b (-1 = пусто)
- *   узел слота s лежит по адресу BUCKETS*4 + s*8, то есть адрес узла считается по номеру слота.
- *   prev/next - соседи слота в цепочке (двусвязный список, -1 = конца нет)
- *
- * Значение поля -> hashCode -> номер корзины. Разные значения могут попасть в одну корзину
- * (коллизия), поэтому после поиска FileStorage сверяет значение в самой записи.
- *
- * Двусвязный список нужен, чтобы удалять слот из цепочки за O(1): соседи известны сразу,
- * по цепочке ходить не надо.
- */
 class HashIndex implements AutoCloseable {
-    static final int BUCKETS = 1 << 16;   // 65536 корзин, степень двойки
+    static final int BUCKETS = 1 << 10;   //степень двойки
     static final int NIL = -1;
     private static final long HEADS_SIZE = (long) BUCKETS * 4;
 
@@ -30,19 +14,19 @@ class HashIndex implements AutoCloseable {
         f = new RandomAccessFile(path, "rw");
     }
 
-    /** Минимальный размер корректного файла индекса. */
+
     static long minSize() {
         return HEADS_SIZE;
     }
 
-    /** Создаёт пустой индекс (все корзины пустые). */
+    //создание пустого инд
     static void create(String path) throws IOException {
         try (HashIndex ix = new HashIndex(path)) {
             ix.reset();
         }
     }
 
-    /** Очищает индекс: файл обрезается и заполняется "пустыми" корзинами (-1). */
+    //очищение инд
     void reset() throws IOException {
         f.setLength(0);
         byte[] heads = new byte[(int) HEADS_SIZE];
@@ -54,8 +38,6 @@ class HashIndex implements AutoCloseable {
     public void close() throws IOException {
         f.close();
     }
-
-    // ---------- низкоуровневое чтение/запись (один вызов ОС на операцию) ----------
 
     private int readInt(long pos) throws IOException {
         byte[] b = new byte[4];
@@ -79,19 +61,14 @@ class HashIndex implements AutoCloseable {
         return HEADS_SIZE + (long) slot * 8;
     }
 
-    // ---------- операции ----------
-
-    /** Первый слот цепочки для значения key (-1, если цепочка пуста). */
     int head(Object key) throws IOException {
         return readInt((long) bucketOf(key) * 4);
     }
 
-    /** Следующий слот в цепочке после slot (-1, если это конец). */
     int next(int slot) throws IOException {
         return readInt(nodePos(slot) + 4);
     }
 
-    /** Добавляет слот в начало цепочки корзины значения key. O(1). */
     void link(int slot, Object key) throws IOException {
         long headPos = (long) bucketOf(key) * 4;
         int oldHead = readInt(headPos);
@@ -107,7 +84,6 @@ class HashIndex implements AutoCloseable {
         writeInt(headPos, slot);                   // новая голова
     }
 
-    /** Убирает слот из цепочки корзины значения key (key - то же значение, что было при link). O(1). */
     void unlink(int slot, Object key) throws IOException {
         long headPos = (long) bucketOf(key) * 4;
 
